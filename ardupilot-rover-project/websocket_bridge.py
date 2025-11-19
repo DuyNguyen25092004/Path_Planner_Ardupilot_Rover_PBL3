@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-MAVLink WebSocket Bridge - Fixed Version
+MAVLink WebSocket Bridge - Version 4 with PARAM-based Speed Control
 Chuyển tiếp MAVLink giữa ArduPilot và Web Browser
-FIX: Đảm bảo xe chạy từ waypoint số 1 (seq=0)
+FIXED: Sử dụng WP_SPEED/CRUISE_SPEED params thay vì DO_CHANGE_SPEED command
 """
 
 import asyncio
@@ -183,65 +183,66 @@ class MAVLinkWebSocketBridge:
         }
         return mode_names.get(custom_mode, f'UNKNOWN({custom_mode})')
     
-    def debug_vehicle_status(self):
-        """Debug - Hiển thị trạng thái chi tiết của vehicle"""
-        print("\n" + "="*60)
-        print("🔍 VEHICLE STATUS DEBUG")
-        print("="*60)
+    def set_speed(self, speed_mps):
+        """Thiết lập tốc độ mục tiêu (m/s) - SỬ DỤNG PARAM THAY VÌ COMMAND"""
+        print(f"\n→ Thiết lập tốc độ: {speed_mps} m/s (~{speed_mps * 3.6:.1f} km/h)")
         
-        msg = self.vehicle.recv_match(type='HEARTBEAT', blocking=True, timeout=2)
-        if msg:
-            armed = msg.base_mode & mavutil.mavlink.MAV_MODE_FLAG_SAFETY_ARMED
-            mode_name = self.get_mode_name(msg.custom_mode)
-            print(f"Mode: {mode_name}")
-            print(f"Armed: {'YES' if armed else 'NO'}")
-            print(f"System Status: {msg.system_status}")
-        
-        msg = self.vehicle.recv_match(type='GPS_RAW_INT', blocking=True, timeout=2)
-        if msg:
-            fix_types = {0: "No GPS", 1: "No Fix", 2: "2D Fix", 3: "3D Fix", 4: "DGPS", 5: "RTK Float", 6: "RTK Fixed"}
-            print(f"GPS: {fix_types.get(msg.fix_type, 'Unknown')} - {msg.satellites_visible} sats")
-        
-        self.vehicle.mav.mission_request_list_send(
-            self.vehicle.target_system,
-            self.vehicle.target_component,
-            mavutil.mavlink.MAV_MISSION_TYPE_MISSION
-        )
-        msg = self.vehicle.recv_match(type='MISSION_COUNT', blocking=True, timeout=2)
-        if msg:
-            print(f"Mission: {msg.count} waypoints uploaded")
-        
-        msg = self.vehicle.recv_match(type='SYS_STATUS', blocking=True, timeout=2)
-        if msg:
-            print(f"Battery: {msg.battery_remaining}% ({msg.voltage_battery/1000:.2f}V)")
-        
-        print("="*60 + "\n")
-    
-    def check_gps_status(self):
-        """Kiểm tra trạng thái GPS"""
-        msg = self.vehicle.recv_match(type='GPS_RAW_INT', blocking=True, timeout=2)
-        if msg:
-            fix_types = {
-                0: "No GPS",
-                1: "No Fix",
-                2: "2D Fix",
-                3: "3D Fix",
-                4: "DGPS",
-                5: "RTK Float",
-                6: "RTK Fixed"
-            }
-            fix_name = fix_types.get(msg.fix_type, "Unknown")
-            print(f"  GPS: {fix_name} ({msg.fix_type}), Satellites: {msg.satellites_visible}")
-            return msg.fix_type >= 3
-        return False
+        try:
+            # PHƯƠNG PHÁP MỚI: Set tham số WP_SPEED và CRUISE_SPEED
+            print(f"  → Đang set WP_SPEED = {speed_mps}")
+            self.vehicle.mav.param_set_send(
+                self.vehicle.target_system,
+                self.vehicle.target_component,
+                b'WP_SPEED',
+                speed_mps,
+                mavutil.mavlink.MAV_PARAM_TYPE_REAL32
+            )
+            
+            # Chờ xác nhận
+            msg = self.vehicle.recv_match(type='PARAM_VALUE', blocking=True, timeout=3)
+            if msg:
+                # Xử lý param_id (có thể là bytes hoặc str tùy phiên bản pymavlink)
+                param_id = msg.param_id
+                if isinstance(param_id, bytes):
+                    param_id = param_id.decode('utf-8').strip('\x00')
+                else:
+                    param_id = param_id.strip('\x00')
+                
+                if param_id == 'WP_SPEED':
+                    print(f"  ✓ WP_SPEED = {msg.param_value} m/s")
+                    
+                    # Set cả CRUISE_SPEED
+                    print(f"  → Đang set CRUISE_SPEED = {speed_mps}")
+                    self.vehicle.mav.param_set_send(
+                        self.vehicle.target_system,
+                        self.vehicle.target_component,
+                        b'CRUISE_SPEED',
+                        speed_mps,
+                        mavutil.mavlink.MAV_PARAM_TYPE_REAL32
+                    )
+                    
+                    msg2 = self.vehicle.recv_match(type='PARAM_VALUE', blocking=True, timeout=3)
+                    if msg2:
+                        print(f"  ✓ CRUISE_SPEED = {msg2.param_value} m/s")
+                    
+                    print(f"✓✓ Đã thiết lập tốc độ thành công: {speed_mps} m/s (~{speed_mps*3.6:.1f} km/h)")
+                    return True
+                else:
+                    print(f"✗ Nhận được param khác: {param_id}")
+                    return False
+            else:
+                print(f"✗ Không nhận được xác nhận từ ArduPilot")
+                return False
+                
+        except Exception as e:
+            print(f"✗ Lỗi khi set tốc độ: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
     
     def arm_vehicle(self):
         """ARM vehicle"""
         print("\n→ Đang ARM vehicle...")
-        
-        print("→ Kiểm tra GPS...")
-        if not self.check_gps_status():
-            print("⚠ Cảnh báo: GPS chưa fix tốt (OK cho SITL)")
         
         msg = self.vehicle.recv_match(type='HEARTBEAT', blocking=True, timeout=2)
         if msg:
@@ -380,14 +381,17 @@ class MAVLinkWebSocketBridge:
         print("✗ Không nhận được ACK khi xóa mission")
         return False
     
-    def upload_mission(self, waypoints):
-        """Upload mission lên vehicle - AUTO thêm vị trí hiện tại làm waypoint 0"""
+    def upload_mission_simple(self, waypoints):
+        """
+        Upload mission đơn giản - chỉ waypoints, không có speed commands
+        """
         if len(waypoints) == 0:
             print("✗ Không có waypoint nào!")
             return False
         
-        # ⭐ AUTO INSERT: Thêm vị trí hiện tại làm waypoint 0
-        print("→ Lấy vị trí hiện tại của xe...")
+        print(f"\n→ Upload {len(waypoints)} waypoints...")
+        
+        # Lấy vị trí hiện tại
         current_pos = self._get_current_position()
         
         if current_pos:
@@ -399,11 +403,6 @@ class MAVLinkWebSocketBridge:
                 'alt': current_pos['alt']
             })
             print(f"  → Auto thêm waypoint 0 (vị trí hiện tại)")
-        else:
-            print("  ⚠ Không lấy được vị trí hiện tại, sử dụng waypoint có sẵn")
-        
-        print(f"\n→ Đang upload {len(waypoints)} waypoints...")
-        print("  ⚠️  FIX: Waypoint 0 sẽ được set là current (seq=0)")
         
         self.clear_mission()
         time.sleep(0.5)
@@ -439,33 +438,30 @@ class MAVLinkWebSocketBridge:
                     return False
             
             seq = msg.seq
-            print(f"  ← Nhận REQUEST cho waypoint {seq}")
             
             if seq >= len(waypoints):
                 print(f"✗ REQUEST seq {seq} vượt quá số waypoints ({len(waypoints)})")
                 return False
             
             wp = waypoints[seq]
-            print(f"  → Gửi waypoint {seq}: lat={wp['lat']:.6f}, lon={wp['lon']:.6f}, alt={wp['alt']}m")
-            
-            # ⭐ KEY FIX: Waypoint đầu tiên PHẢI có current=1
             current = 1 if seq == 0 else 0
             
+            # Gửi waypoint
             self.vehicle.mav.mission_item_int_send(
                 self.vehicle.target_system,
                 self.vehicle.target_component,
                 seq,
                 mavutil.mavlink.MAV_FRAME_GLOBAL_RELATIVE_ALT_INT,
                 mavutil.mavlink.MAV_CMD_NAV_WAYPOINT,
-                current,  # 🔑 current = 1 cho waypoint 0
-                1,
-                0,
-                2.0,
-                0,
-                float('nan'),
+                current,
+                1,  # autocontinue
+                0,  # param1 (hold time)
+                2.0,  # param2 (acceptance radius)
+                0,  # param3 (pass radius)
+                float('nan'),  # param4 (yaw)
                 int(wp['lat'] * 1e7),
                 int(wp['lon'] * 1e7),
-                float(wp['alt'])
+                float(wp.get('alt', 10))
             )
             
             waypoints_sent += 1
@@ -474,7 +470,6 @@ class MAVLinkWebSocketBridge:
                 print("✗ Timeout 30s khi upload mission")
                 return False
         
-        print("  → Đã gửi hết waypoints, đợi MISSION_ACK...")
         msg = self.vehicle.recv_match(type='MISSION_ACK', blocking=True, timeout=10)
         if msg:
             if msg.type == mavutil.mavlink.MAV_MISSION_ACCEPTED:
@@ -483,35 +478,43 @@ class MAVLinkWebSocketBridge:
             else:
                 print(f"✗ Upload mission thất bại! ACK Type: {msg.type}")
                 return False
-        else:
-            print(f"✗ Không nhận được MISSION_ACK sau khi gửi hết waypoints")
-            return False
-    
-    def verify_mission_uploaded(self):
-        """Kiểm tra mission đã được upload chưa"""
-        print("→ Kiểm tra mission đã upload...")
         
-        self.vehicle.mav.mission_request_list_send(
-            self.vehicle.target_system,
-            self.vehicle.target_component,
-            mavutil.mavlink.MAV_MISSION_TYPE_MISSION
-        )
-        
-        msg = self.vehicle.recv_match(type='MISSION_COUNT', blocking=True, timeout=3)
-        if msg:
-            count = msg.count
-            print(f"  Mission count: {count}")
-            return count > 0
-        
-        print("  ✗ Không nhận được MISSION_COUNT")
+        print(f"✗ Không nhận được MISSION_ACK sau khi gửi hết waypoints")
         return False
     
+    def upload_mission_with_speed(self, waypoints):
+        """
+        Upload mission và set speed qua PARAM
+        """
+        if len(waypoints) == 0:
+            print("✗ Không có waypoint nào!")
+            return False
+        
+        # Lấy tốc độ trung bình hoặc tốc độ cao nhất
+        speeds = [wp.get('speed', 5.0) for wp in waypoints]
+        avg_speed = sum(speeds) / len(speeds)
+        max_speed = max(speeds)
+        
+        print(f"\n→ Upload mission với tốc độ:")
+        print(f"  • Tốc độ trung bình: {avg_speed:.1f} m/s")
+        print(f"  • Tốc độ tối đa: {max_speed:.1f} m/s")
+        print(f"  → Sẽ sử dụng tốc độ: {max_speed:.1f} m/s")
+        
+        # Set tốc độ trước khi upload mission
+        if not self.set_speed(max_speed):
+            print("⚠ Cảnh báo: Không thể set tốc độ, tiếp tục upload mission...")
+        
+        time.sleep(0.5)
+        
+        # Upload mission như bình thường (không cần DO_CHANGE_SPEED)
+        return self.upload_mission_simple(waypoints)
+    
     def start_mission(self):
-        """Bắt đầu mission - FIX: Thử GUIDED trước rồi mới AUTO"""
+        """Bắt đầu mission"""
         print("\n→ Đang bắt đầu mission...")
         
         mission_count = self._get_mission_count()
-        print(f"→ Mission count: {mission_count} waypoints")
+        print(f"→ Mission count: {mission_count} items")
         
         if mission_count == 0:
             print("✗ Chưa có mission nào được upload!")
@@ -526,12 +529,6 @@ class MAVLinkWebSocketBridge:
         else:
             print("✓ Vehicle đã ARM")
         
-        print("→ Kiểm tra GPS...")
-        msg = self.vehicle.recv_match(type='GPS_RAW_INT', blocking=True, timeout=2)
-        if msg:
-            print(f"  GPS Fix: {msg.fix_type}, Satellites: {msg.satellites_visible}")
-        
-        # ⭐ BỌC CHÍNH: Thử GUIDED trước để "prepare" vehicle
         print("→ Chuyển sang GUIDED mode trước (prepare)...")
         if self.set_mode('GUIDED'):
             print("✓ Đã vào GUIDED mode")
@@ -539,7 +536,6 @@ class MAVLinkWebSocketBridge:
         else:
             print("⚠ GUIDED mode thất bại, tiếp tục thử AUTO...")
         
-        # Sau đó chuyển sang AUTO
         print("→ Chuyển sang AUTO mode...")
         max_retries = 3
         for attempt in range(max_retries):
@@ -552,26 +548,21 @@ class MAVLinkWebSocketBridge:
                 
                 time.sleep(1)
                 
-                # Kiểm tra mission status
                 msg = self.vehicle.recv_match(type='MISSION_CURRENT', blocking=True, timeout=2)
                 if msg:
-                    print(f"✓ Mission đang chạy, waypoint hiện tại: {msg.seq}")
+                    print(f"✓ Mission đang chạy, item hiện tại: {msg.seq}")
                     if msg.seq == 0:
-                        print("✓✓ Đúng! Đang chạy từ waypoint 0!")
+                        print("✓✓ Đúng! Đang chạy từ item 0!")
                     else:
-                        print(f"⚠ CẢNH BÁO: Đang chạy từ waypoint {msg.seq} (không phải 0)")
+                        print(f"⚠ CẢNH BÁO: Đang chạy từ item {msg.seq} (không phải 0)")
                 
                 return True
         
         print("✗ Không thể chuyển sang AUTO mode sau nhiều lần thử")
-        print("\n💡 Thử các giải pháp:")
-        print("  1. Kiểm tra mission có hợp lệ không (ít nhất 2 waypoints)")
-        print("  2. Thử upload mission lại")
-        print("  3. Kiểm tra trong QGC có lỗi gì không")
         return False
     
     def _get_mission_count(self):
-        """Helper: Lấy số lượng waypoints trong mission"""
+        """Helper: Lấy số lượng items trong mission"""
         self.vehicle.mav.mission_request_list_send(
             self.vehicle.target_system,
             self.vehicle.target_component,
@@ -637,22 +628,40 @@ class MAVLinkWebSocketBridge:
                     lat = data.get('x')
                     lon = data.get('y')
                     alt = data.get('z', 10)
+                    speed = data.get('speed', 5.0)
                     
                     waypoint = {
                         'seq': seq,
                         'lat': lat,
                         'lon': lon,
-                        'alt': alt
+                        'alt': alt,
+                        'speed': speed
                     }
                     self.mission_items.append(waypoint)
-                    print(f"  → Nhận waypoint {seq}: {lat:.6f}, {lon:.6f}, {alt}m")
+                    print(f"  ✓ Nhận waypoint {seq}: {lat:.6f}, {lon:.6f}, {alt}m, speed={speed}m/s (~{speed*3.6:.1f}km/h)")
                 
                 elif command == 'MISSION_START':
                     if len(self.mission_items) > 0:
                         self.mission_items.sort(key=lambda x: x['seq'])
                         
+                        # In ra tổng quan về speeds
+                        speeds = [wp['speed'] for wp in self.mission_items]
+                        unique_speeds = set(speeds)
+                        print(f"\n📊 TỔNG QUAN TỐC ĐỘ:")
+                        print(f"  • Tổng số waypoints: {len(self.mission_items)}")
+                        print(f"  • Các tốc độ khác nhau: {sorted(unique_speeds)} m/s")
+                        
                         loop = asyncio.get_event_loop()
-                        success = await loop.run_in_executor(None, self.upload_mission, self.mission_items)
+                        
+                        # Luôn dùng phương pháp set PARAM
+                        if len(unique_speeds) > 1:
+                            print("\n→ Phát hiện nhiều tốc độ khác nhau, sẽ dùng tốc độ cao nhất...")
+                        
+                        success = await loop.run_in_executor(
+                            None, 
+                            self.upload_mission_with_speed, 
+                            self.mission_items.copy()
+                        )
                         
                         if success:
                             await asyncio.sleep(0.5)
@@ -677,9 +686,12 @@ class MAVLinkWebSocketBridge:
                     )
                     print("✓ Đã yêu cầu data stream")
                 
-                elif command == 'DEBUG_STATUS':
+                elif command == 'SET_SPEED':
+                    speed = data.get('speed', 5.0)
                     loop = asyncio.get_event_loop()
-                    await loop.run_in_executor(None, self.debug_vehicle_status)
+                    success = await loop.run_in_executor(None, self.set_speed, speed)
+                    response = {'type': 'SET_SPEED_RESPONSE', 'success': success, 'speed': speed}
+                    await websocket.send(json.dumps(response))
                 
             except json.JSONDecodeError:
                 print(f"✗ JSON decode error: {message}")
@@ -734,6 +746,11 @@ class MAVLinkWebSocketBridge:
             print(f"✓ WebSocket server đang chạy tại ws://localhost:{self.websocket_port}")
             print(f"  Kết nối từ trình duyệt: ws://localhost:{self.websocket_port}")
             print(f"{'='*60}\n")
+            print("🚀 FEATURES:")
+            print("  ✓ Sử dụng WP_SPEED và CRUISE_SPEED params")
+            print("  ✓ Tự động set tốc độ trước khi upload mission")
+            print("  ✓ Waypoint interval: 1m (độ chính xác cao)")
+            print(f"{'='*60}\n")
             print("Đang chờ client kết nối...")
             
             await self.broadcast_mavlink_data()
@@ -749,7 +766,7 @@ class MAVLinkWebSocketBridge:
 if __name__ == '__main__':
     import argparse
     
-    parser = argparse.ArgumentParser(description='MAVLink WebSocket Bridge')
+    parser = argparse.ArgumentParser(description='MAVLink WebSocket Bridge v4 - PARAM-based Speed Control')
     parser.add_argument('--mavlink', default='udp:127.0.0.1:14550',
                         help='MAVLink connection string (default: udp:127.0.0.1:14550)')
     parser.add_argument('--port', type=int, default=5760,
@@ -758,15 +775,19 @@ if __name__ == '__main__':
     args = parser.parse_args()
     
     print("=" * 60)
-    print("MAVLink WebSocket Bridge - FIXED VERSION")
+    print("MAVLink WebSocket Bridge - VERSION 4.0 (PARAM-BASED)")
     print("=" * 60)
     print(f"MAVLink: {args.mavlink}")
     print(f"WebSocket Port: {args.port}")
     print("=" * 60)
-    print("\n🔧 FIX Applied:")
-    print("  ✓ Waypoint 0 được set là current (seq=0)")
-    print("  ✓ Không chuyển sang GUIDED trước khi AUTO")
-    print("  ✓ Verify mission chạy từ waypoint 0")
+    print("\n🔧 FIXED ISSUES:")
+    print("  ✓ Sử dụng WP_SPEED và CRUISE_SPEED params")
+    print("  ✓ Không dùng DO_CHANGE_SPEED (Rover không hỗ trợ)")
+    print("  ✓ Tự động set tốc độ trước khi upload mission")
+    print("\n📋 PHƯƠNG PHÁP:")
+    print("  • Set param WP_SPEED trước khi upload")
+    print("  • Set param CRUISE_SPEED để đảm bảo")
+    print("  • Upload waypoints đơn giản (không speed commands)")
     print("\n" + "=" * 60 + "\n")
     
     bridge = MAVLinkWebSocketBridge(args.mavlink, args.port)
