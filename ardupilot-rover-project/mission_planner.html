@@ -1,0 +1,760 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MAVLink Mission Planner</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: #1a1a1a;
+            color: #fff;
+            overflow: hidden;
+        }
+
+        .container {
+            display: grid;
+            grid-template-columns: 350px 1fr;
+            height: 100vh;
+        }
+
+        .sidebar {
+            background: #2a2a2a;
+            display: flex;
+            flex-direction: column;
+            overflow-y: auto;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            padding: 20px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+        }
+
+        h1 {
+            font-size: 20px;
+            margin-bottom: 10px;
+        }
+
+        .connection-section {
+            display: flex;
+            gap: 10px;
+            margin-top: 10px;
+        }
+
+        input[type="text"] {
+            flex: 1;
+            padding: 8px;
+            border: 2px solid #444;
+            border-radius: 5px;
+            font-size: 12px;
+            background: #333;
+            color: #fff;
+        }
+
+        button {
+            padding: 8px 15px;
+            border: none;
+            border-radius: 5px;
+            font-size: 12px;
+            cursor: pointer;
+            transition: all 0.3s;
+            font-weight: bold;
+        }
+
+        .btn-connect {
+            background: #4CAF50;
+            color: white;
+        }
+
+        .btn-connect:hover {
+            background: #45a049;
+        }
+
+        .btn-disconnect {
+            background: #f44336;
+            color: white;
+        }
+
+        .btn-primary {
+            background: #2196F3;
+            color: white;
+            width: 100%;
+            padding: 10px;
+        }
+
+        .btn-primary:hover {
+            background: #0b7dda;
+        }
+
+        .btn-danger {
+            background: #f44336;
+            color: white;
+            width: 100%;
+            padding: 10px;
+        }
+
+        .btn-danger:hover {
+            background: #da190b;
+        }
+
+        .btn-warning {
+            background: #ff9800;
+            color: white;
+            width: 100%;
+            padding: 10px;
+        }
+
+        .btn-success {
+            background: #4CAF50;
+            color: white;
+            width: 100%;
+            padding: 10px;
+        }
+
+        .status {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 15px;
+            font-size: 11px;
+            font-weight: bold;
+            margin-left: 10px;
+        }
+
+        .status.connected {
+            background: #4CAF50;
+            color: white;
+        }
+
+        .status.disconnected {
+            background: #f44336;
+            color: white;
+        }
+
+        .section {
+            padding: 20px;
+            border-bottom: 1px solid #444;
+        }
+
+        .section h2 {
+            font-size: 16px;
+            margin-bottom: 15px;
+            color: #667eea;
+        }
+
+        .telemetry-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 10px;
+            margin-bottom: 15px;
+        }
+
+        .telemetry-item {
+            background: #333;
+            padding: 10px;
+            border-radius: 5px;
+            border-left: 3px solid #667eea;
+        }
+
+        .telemetry-label {
+            font-size: 11px;
+            color: #999;
+            margin-bottom: 3px;
+        }
+
+        .telemetry-value {
+            font-size: 18px;
+            font-weight: bold;
+            color: #fff;
+        }
+
+        .telemetry-unit {
+            font-size: 12px;
+            color: #999;
+            margin-left: 3px;
+        }
+
+        .controls {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 10px;
+            margin-bottom: 15px;
+        }
+
+        .waypoint-list {
+            max-height: 200px;
+            overflow-y: auto;
+            background: #333;
+            border-radius: 5px;
+            padding: 10px;
+        }
+
+        .waypoint-item {
+            background: #444;
+            padding: 10px;
+            margin-bottom: 8px;
+            border-radius: 5px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .waypoint-info {
+            flex: 1;
+        }
+
+        .waypoint-number {
+            font-weight: bold;
+            color: #667eea;
+            margin-right: 10px;
+        }
+
+        .waypoint-coords {
+            font-size: 11px;
+            color: #999;
+        }
+
+        .btn-delete {
+            background: #f44336;
+            color: white;
+            padding: 5px 10px;
+            font-size: 11px;
+        }
+
+        #map {
+            height: 100vh;
+            width: 100%;
+        }
+
+        .log-container {
+            background: #1e1e1e;
+            padding: 10px;
+            border-radius: 5px;
+            height: 150px;
+            overflow-y: auto;
+            font-family: 'Courier New', monospace;
+            font-size: 11px;
+        }
+
+        .log-entry {
+            margin-bottom: 3px;
+            color: #00ff00;
+        }
+
+        .log-time {
+            color: #888;
+        }
+
+        .mode-display {
+            background: #333;
+            padding: 10px;
+            border-radius: 5px;
+            text-align: center;
+            margin-bottom: 10px;
+        }
+
+        .mode-label {
+            font-size: 11px;
+            color: #999;
+        }
+
+        .mode-value {
+            font-size: 20px;
+            font-weight: bold;
+            color: #4CAF50;
+        }
+
+        .mission-info {
+            background: #333;
+            padding: 10px;
+            border-radius: 5px;
+            margin-bottom: 10px;
+        }
+
+        .info-row {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 5px;
+            font-size: 12px;
+        }
+
+        .info-label {
+            color: #999;
+        }
+
+        .info-value {
+            color: #fff;
+            font-weight: bold;
+        }
+
+        ::-webkit-scrollbar {
+            width: 8px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: #2a2a2a;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: #667eea;
+            border-radius: 4px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Sidebar -->
+        <div class="sidebar">
+            <div class="header">
+                <h1>🚁 Mission Planner</h1>
+                <div class="connection-section">
+                    <input type="text" id="wsUrl" value="ws://localhost:5760" placeholder="WebSocket URL">
+                    <button class="btn-connect" id="btnConnect">Kết nối</button>
+                    <button class="btn-disconnect" id="btnDisconnect" style="display:none;">Ngắt</button>
+                </div>
+                <span class="status disconnected" id="status">Chưa kết nối</span>
+            </div>
+
+            <!-- Telemetry Section -->
+            <div class="section">
+                <h2>📊 Telemetry</h2>
+                <div class="mode-display">
+                    <div class="mode-label">Flight Mode</div>
+                    <div class="mode-value" id="flightMode">--</div>
+                </div>
+                <div class="telemetry-grid">
+                    <div class="telemetry-item">
+                        <div class="telemetry-label">Latitude</div>
+                        <div class="telemetry-value" id="lat">--<span class="telemetry-unit">°</span></div>
+                    </div>
+                    <div class="telemetry-item">
+                        <div class="telemetry-label">Longitude</div>
+                        <div class="telemetry-value" id="lon">--<span class="telemetry-unit">°</span></div>
+                    </div>
+                    <div class="telemetry-item">
+                        <div class="telemetry-label">Altitude</div>
+                        <div class="telemetry-value" id="alt">--<span class="telemetry-unit">m</span></div>
+                    </div>
+                    <div class="telemetry-item">
+                        <div class="telemetry-label">Speed</div>
+                        <div class="telemetry-value" id="speed">--<span class="telemetry-unit">m/s</span></div>
+                    </div>
+                    <div class="telemetry-item">
+                        <div class="telemetry-label">Heading</div>
+                        <div class="telemetry-value" id="heading">--<span class="telemetry-unit">°</span></div>
+                    </div>
+                    <div class="telemetry-item">
+                        <div class="telemetry-label">Battery</div>
+                        <div class="telemetry-value" id="battery">--<span class="telemetry-unit">%</span></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Mission Section -->
+            <div class="section">
+                <h2>🎯 Mission Planning</h2>
+                <div class="mission-info">
+                    <div class="info-row">
+                        <span class="info-label">Total Waypoints:</span>
+                        <span class="info-value" id="waypointCount">0</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">Mission Distance:</span>
+                        <span class="info-value" id="missionDistance">0 m</span>
+                    </div>
+                </div>
+                <div class="waypoint-list" id="waypointList"></div>
+                <div class="controls" style="margin-top: 10px;">
+                    <button class="btn-danger" onclick="clearWaypoints()">Xóa tất cả</button>
+                    <button class="btn-primary" onclick="uploadMission()">Tải lên Mission</button>
+                </div>
+            </div>
+
+            <!-- Control Section -->
+            <div class="section">
+                <h2>🎮 Controls</h2>
+                <div class="controls">
+                    <button class="btn-success" onclick="sendCommand('ARM')">ARM</button>
+                    <button class="btn-danger" onclick="sendCommand('DISARM')">DISARM</button>
+                    <button class="btn-primary" onclick="setMode('GUIDED')">GUIDED</button>
+                    <button class="btn-primary" onclick="setMode('AUTO')">AUTO</button>
+                    <button class="btn-warning" onclick="setMode('HOLD')">HOLD</button>
+                    <button class="btn-warning" onclick="setMode('RTL')">RTL</button>
+                </div>
+                <button class="btn-success" onclick="startMission()" style="margin-top: 10px;">▶ Bắt đầu Mission</button>
+            </div>
+
+            <!-- Log Section -->
+            <div class="section">
+                <h2>📝 Log</h2>
+                <div class="log-container" id="logContainer"></div>
+            </div>
+        </div>
+
+        <!-- Map -->
+        <div id="map"></div>
+    </div>
+
+    <script>
+        let ws = null;
+        let map = null;
+        let waypoints = [];
+        let waypointMarkers = [];
+        let pathPolyline = null;
+        let vehicleMarker = null;
+        let vehiclePosition = null;
+
+        // Khởi tạo bản đồ
+        function initMap() {
+            // Tọa độ mặc định (Đà Nẵng)
+            map = L.map('map').setView([16.0544, 108.2022], 13);
+
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                attribution: '© OpenStreetMap contributors'
+            }).addTo(map);
+
+            // Custom icon cho vehicle
+            const vehicleIcon = L.divIcon({
+                className: 'vehicle-marker',
+                html: '<div style="background: #4CAF50; width: 20px; height: 20px; border-radius: 50%; border: 3px solid white; box-shadow: 0 0 10px rgba(0,0,0,0.5);"></div>',
+                iconSize: [20, 20]
+            });
+
+            vehicleMarker = L.marker([16.0544, 108.2022], { icon: vehicleIcon }).addTo(map);
+
+            // Click để thêm waypoint
+            map.on('click', function(e) {
+                addWaypoint(e.latlng.lat, e.latlng.lng);
+            });
+
+            addLog('Bản đồ đã sẵn sàng. Click trên bản đồ để thêm waypoint.');
+        }
+
+        // Thêm waypoint
+        function addWaypoint(lat, lon) {
+            const waypoint = { lat, lon, seq: waypoints.length };
+            waypoints.push(waypoint);
+
+            // Thêm marker
+            const marker = L.marker([lat, lon], {
+                draggable: true,
+                icon: L.divIcon({
+                    className: 'waypoint-marker',
+                    html: `<div style="background: #2196F3; color: white; width: 30px; height: 30px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: bold; border: 2px solid white; box-shadow: 0 2px 5px rgba(0,0,0,0.3);">${waypoint.seq + 1}</div>`,
+                    iconSize: [30, 30]
+                })
+            }).addTo(map);
+
+            marker.on('drag', function(e) {
+                const pos = e.target.getLatLng();
+                waypoints[waypoint.seq].lat = pos.lat;
+                waypoints[waypoint.seq].lon = pos.lng;
+                updatePath();
+                updateWaypointList();
+            });
+
+            waypointMarkers.push(marker);
+            updatePath();
+            updateWaypointList();
+            addLog(`Đã thêm waypoint ${waypoint.seq + 1} tại ${lat.toFixed(6)}, ${lon.toFixed(6)}`);
+        }
+
+        // Cập nhật đường đi
+        function updatePath() {
+            if (pathPolyline) {
+                map.removeLayer(pathPolyline);
+            }
+
+            if (waypoints.length > 1) {
+                const latlngs = waypoints.map(wp => [wp.lat, wp.lon]);
+                pathPolyline = L.polyline(latlngs, {
+                    color: '#2196F3',
+                    weight: 3,
+                    opacity: 0.7,
+                    dashArray: '10, 10'
+                }).addTo(map);
+            }
+
+            // Tính khoảng cách
+            let totalDistance = 0;
+            for (let i = 1; i < waypoints.length; i++) {
+                const d = calculateDistance(
+                    waypoints[i-1].lat, waypoints[i-1].lon,
+                    waypoints[i].lat, waypoints[i].lon
+                );
+                totalDistance += d;
+            }
+            document.getElementById('missionDistance').textContent = totalDistance.toFixed(0) + ' m';
+        }
+
+        // Tính khoảng cách giữa 2 điểm
+        function calculateDistance(lat1, lon1, lat2, lon2) {
+            const R = 6371000; // Bán kính Trái Đất (m)
+            const dLat = (lat2 - lat1) * Math.PI / 180;
+            const dLon = (lon2 - lon1) * Math.PI / 180;
+            const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+                      Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+                      Math.sin(dLon/2) * Math.sin(dLon/2);
+            const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+            return R * c;
+        }
+
+        // Cập nhật danh sách waypoint
+        function updateWaypointList() {
+            const list = document.getElementById('waypointList');
+            list.innerHTML = '';
+
+            waypoints.forEach((wp, idx) => {
+                const item = document.createElement('div');
+                item.className = 'waypoint-item';
+                item.innerHTML = `
+                    <div class="waypoint-info">
+                        <span class="waypoint-number">WP${idx + 1}</span>
+                        <div class="waypoint-coords">${wp.lat.toFixed(6)}, ${wp.lon.toFixed(6)}</div>
+                    </div>
+                    <button class="btn-delete" onclick="deleteWaypoint(${idx})">Xóa</button>
+                `;
+                list.appendChild(item);
+            });
+
+            document.getElementById('waypointCount').textContent = waypoints.length;
+        }
+
+        // Xóa waypoint
+        function deleteWaypoint(idx) {
+            waypoints.splice(idx, 1);
+            map.removeLayer(waypointMarkers[idx]);
+            waypointMarkers.splice(idx, 1);
+
+            // Cập nhật lại số thứ tự
+            waypoints.forEach((wp, i) => {
+                wp.seq = i;
+            });
+
+            // Cập nhật lại markers
+            waypointMarkers.forEach((marker, i) => {
+                marker.setIcon(L.divIcon({
+                    className: 'waypoint-marker',
+                    html: `<div style="background: #2196F3; color: white; width: 30px; height: 30px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: bold; border: 2px solid white; box-shadow: 0 2px 5px rgba(0,0,0,0.3);">${i + 1}</div>`,
+                    iconSize: [30, 30]
+                }));
+            });
+
+            updatePath();
+            updateWaypointList();
+            addLog(`Đã xóa waypoint ${idx + 1}`);
+        }
+
+        // Xóa tất cả waypoint
+        function clearWaypoints() {
+            waypoints = [];
+            waypointMarkers.forEach(marker => map.removeLayer(marker));
+            waypointMarkers = [];
+            if (pathPolyline) {
+                map.removeLayer(pathPolyline);
+            }
+            updateWaypointList();
+            addLog('Đã xóa tất cả waypoints');
+        }
+
+        // Tải mission lên vehicle
+        function uploadMission() {
+            if (!ws || ws.readyState !== WebSocket.OPEN) {
+                addLog('✗ WebSocket chưa kết nối!');
+                return;
+            }
+
+            if (waypoints.length === 0) {
+                addLog('✗ Chưa có waypoint nào!');
+                return;
+            }
+
+            addLog(`→ Đang tải ${waypoints.length} waypoints...`);
+
+            // Gửi số lượng waypoint
+            ws.send(JSON.stringify({
+                command: 'MISSION_COUNT',
+                count: waypoints.length
+            }));
+
+            // Gửi từng waypoint
+            setTimeout(() => {
+                waypoints.forEach((wp, idx) => {
+                    setTimeout(() => {
+                        ws.send(JSON.stringify({
+                            command: 'MISSION_ITEM',
+                            seq: idx,
+                            x: wp.lat,
+                            y: wp.lon,
+                            z: 10  // altitude 10m
+                        }));
+                        addLog(`→ Gửi waypoint ${idx + 1}`);
+                    }, idx * 200);
+                });
+
+                setTimeout(() => {
+                    addLog('✓ Mission đã được tải lên!');
+                }, waypoints.length * 200 + 500);
+            }, 500);
+        }
+
+        // Bắt đầu mission
+        function startMission() {
+            if (!ws || ws.readyState !== WebSocket.OPEN) {
+                addLog('✗ WebSocket chưa kết nối!');
+                return;
+            }
+
+            if (waypoints.length === 0) {
+                addLog('✗ Chưa có waypoint nào!');
+                return;
+            }
+
+            ws.send(JSON.stringify({ command: 'MISSION_START' }));
+            addLog('→ Bắt đầu mission...');
+        }
+
+        // WebSocket
+        const btnConnect = document.getElementById('btnConnect');
+        const btnDisconnect = document.getElementById('btnDisconnect');
+        const statusEl = document.getElementById('status');
+        const wsUrlInput = document.getElementById('wsUrl');
+
+        btnConnect.addEventListener('click', () => {
+            connect(wsUrlInput.value);
+        });
+
+        btnDisconnect.addEventListener('click', () => {
+            if (ws) {
+                ws.close();
+                addLog('→ Đang ngắt kết nối...');
+            }
+        });
+
+        function connect(url) {
+            try {
+                addLog(`→ Đang kết nối tới ${url}...`);
+                ws = new WebSocket(url);
+
+                ws.onopen = () => {
+                    addLog('✓ Đã kết nối WebSocket!');
+                    statusEl.textContent = 'Đã kết nối';
+                    statusEl.className = 'status connected';
+                    btnConnect.style.display = 'none';
+                    btnDisconnect.style.display = 'inline-block';
+
+                    // Request data stream sau khi kết nối
+                    setTimeout(() => {
+                        ws.send(JSON.stringify({command: 'REQUEST_DATA_STREAM'}));
+                        addLog('→ Đã yêu cầu data stream');
+                    }, 1000);
+                };
+
+                ws.onmessage = (event) => {
+                    try {
+                        const data = JSON.parse(event.data);
+                        handleMAVLinkMessage(data);
+                    } catch (e) {
+                        console.error('JSON parse error:', e);
+                        addLog('✗ Lỗi parse JSON: ' + e.message);
+                    }
+                };
+
+                ws.onerror = (error) => {
+                    addLog('✗ Lỗi WebSocket: ' + (error.message || 'Unknown error'));
+                    console.error('WebSocket error:', error);
+                };
+
+                ws.onclose = () => {
+                    addLog('✗ WebSocket đã đóng');
+                    statusEl.textContent = 'Chưa kết nối';
+                    statusEl.className = 'status disconnected';
+                    btnConnect.style.display = 'inline-block';
+                    btnDisconnect.style.display = 'none';
+                };
+
+            } catch (e) {
+                addLog('✗ Không thể kết nối: ' + e.message);
+                console.error('Connection error:', e);
+            }
+        }
+
+        function handleMAVLinkMessage(data) {
+            const type = data.type;
+
+            if (type === 'HEARTBEAT') {
+                const modes = ['MANUAL', 'ACRO', 'LEARNING', 'STEERING', 'HOLD', '', '', '', '', '', 'AUTO', 'RTL', '', '', '', 'GUIDED'];
+                const mode = modes[data.custom_mode] || 'UNKNOWN';
+                document.getElementById('flightMode').textContent = mode;
+            }
+            else if (type === 'GLOBAL_POSITION_INT') {
+                const lat = data.lat / 1e7;
+                const lon = data.lon / 1e7;
+                const alt = (data.alt / 1000).toFixed(1);
+                const heading = (data.hdg / 100).toFixed(0);
+
+                vehiclePosition = { lat, lon };
+                vehicleMarker.setLatLng([lat, lon]);
+
+                document.getElementById('lat').innerHTML = lat.toFixed(6) + '<span class="telemetry-unit">°</span>';
+                document.getElementById('lon').innerHTML = lon.toFixed(6) + '<span class="telemetry-unit">°</span>';
+                document.getElementById('alt').innerHTML = alt + '<span class="telemetry-unit">m</span>';
+                document.getElementById('heading').innerHTML = heading + '<span class="telemetry-unit">°</span>';
+            }
+            else if (type === 'VFR_HUD') {
+                const speed = data.groundspeed.toFixed(1);
+                document.getElementById('speed').innerHTML = speed + '<span class="telemetry-unit">m/s</span>';
+            }
+            else if (type === 'SYS_STATUS') {
+                const battery = data.battery_remaining;
+                document.getElementById('battery').innerHTML = battery + '<span class="telemetry-unit">%</span>';
+            }
+        }
+
+        function sendCommand(command, params = {}) {
+            if (!ws || ws.readyState !== WebSocket.OPEN) {
+                addLog('✗ WebSocket chưa kết nối!');
+                return;
+            }
+
+            const message = { command: command, ...params };
+            ws.send(JSON.stringify(message));
+            addLog(`→ Gửi lệnh: ${command}`);
+        }
+
+        function setMode(mode) {
+            sendCommand('SET_MODE', { mode: mode });
+        }
+
+        function addLog(message) {
+            const time = new Date().toLocaleTimeString();
+            const entry = document.createElement('div');
+            entry.className = 'log-entry';
+            entry.innerHTML = `<span class="log-time">[${time}]</span> ${message}`;
+            const container = document.getElementById('logContainer');
+            container.appendChild(entry);
+            container.scrollTop = container.scrollHeight;
+
+            // Giới hạn 50 log entries
+            while (container.children.length > 50) {
+                container.removeChild(container.firstChild);
+            }
+        }
+
+        // Khởi tạo
+        window.addEventListener('load', () => {
+            initMap();
+            addLog('Mission Planner đã sẵn sàng!');
+            addLog('Nhập WebSocket URL và nhấn "Kết nối"');
+        });
+    </script>
+</body>
+</html>
